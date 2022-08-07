@@ -123,8 +123,61 @@ Create a KMS key from Key Management Service (KMS) to be used to encrypt the dat
 ![KMS](./media/kms.png)
 
 
-### Create DB Subnet Group
+## STEP 5:  Create DB Subnet Group
 
 On the RDS Management Console, create a DB subnet group with the two datalayer private subnets in the two Availability Zones.
 
-![RDS subnet grouo](./media/rdssubnetgroup.png)
+![RDS subnet group](./media/rdssubnetgroup.png)
+
+
+### Create RDS
+
+- Click on Create Database
+- Select MySQL
+- Choose Free Tier from the Templates
+- Enter a name for the DB
+- Create Master username and passsword
+- Select the VPC, select the subnet group that was created earlier and the database security group
+- Scroll down to Additional configuration
+- Enter initial database name
+- Scroll down and click Create database
+
+![RDS creation](./media/rdscreation.png)
+
+
+## STEP 6: Create Compute Resources
+
+Configure compute resources inside the VPC. The recources related to compute are:
+
+- EC2 Instances
+- Launch Templates
+- Target Groups
+- Autoscaling Groups
+- TLS Certificates
+- Application Load Balancers (ALB)
+
+Configure the Public Subnets as follows so the instances can be assigned a public IPv4 address:
+
+- In the left navigation pane, choose Subnets.
+- Select the public subnet for the VPC. By default, the name created by the VPC wizard is Public subnet.
+- Choose Actions, Modify auto-assign IP settings.
+Select the Enable auto-assign public IPv4 address check box, and then choose Save.
+- Launch templates.
+
+First create three EC2 instance for Nginx server, Bastion server and Webserver.
+- Launch 3 EC2 instances (Red Hat Free Tier) with default settings and a security group that allows access from all traffic (0.0.0.0/0).
+
+![Instances](./media/3servers.png)
+
+### Set up the Bastion server:
+
+Install the following:
+
+```
+yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm 
+yum install -y dnf-utils http://rpms.remirepo.net/enterprise/remi-release-8.rpm 
+yum install wget vim python3 telnet htop git mysql net-tools chrony -y 
+systemctl start chronyd
+systemctl enable chronyd
+```
+
