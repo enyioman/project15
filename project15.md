@@ -504,7 +504,7 @@ Connect to the bastion server through SSH. Then connect to the RDS database:
 mysql -h toolingdb.c9tkkvrdsgea.us-east-1.rds.amazonaws.com -u admin -p 
 ```
 
-![DB connect](./media/rdsconn.png)
+![DB connect](./media/dbconn.png)
                                                     
 
 In MySQL, create a database called `toolingdb`:
