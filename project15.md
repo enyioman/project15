@@ -165,13 +165,13 @@ Select the Enable auto-assign public IPv4 address check box, and then choose Sav
 - Launch templates.
 
 First create three EC2 instance for Nginx server, Bastion server and Webserver.
-- Launch 3 EC2 instances (Red Hat Free Tier) with default settings and a security group that allows access from all traffic (0.0.0.0/0).
+- Launch 3 EC2 instances (Red Hat Free Tier).
+
 
 ![Instances](./media/3servers.png)
 
-### Set up the Bastion server:
+### Install the following packages:
 
-Install the following:
 
 ```
 yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm 
@@ -179,5 +179,160 @@ yum install -y dnf-utils http://rpms.remirepo.net/enterprise/remi-release-8.rpm
 yum install wget vim python3 telnet htop git mysql net-tools chrony -y 
 systemctl start chronyd
 systemctl enable chronyd
+```
+
+- Disable senten so that our servers can function properly on all the redhat instance (Nginx & Webserver only):
+
+```
+setsebool -P httpd_can_network_connect=1
+setsebool -P httpd_can_network_connect_db=1
+setsebool -P httpd_execmem=1
+setsebool -P httpd_use_nfs 1
+```
+
+- Install Amazon efs utils for mounting targets on the elastic file system (Nginx & webserver only):
+
+```
+git clone https://github.com/aws/efs-utils
+cd efs-utils
+yum install -y make
+yum install -y rpm-build
+make rpm 
+yum install -y  ./build/amazon-efs-utils*rpm
+```
+
+- Install self-signed certificate on Nginx. The reason we are installing this is because the load balancer will be sending traffic to the webserver via port 443 and also listen on port 443 thus for the connection to be secured we need a self signed certificate on the nginx instance.
+
+```
+sudo mkdir /etc/ssl/private
+sudo chmod 700 /etc/ssl/private
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/ACS.key -out /etc/ssl/certs/ACS.crt
+sudo openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048
+```
+
+- Confirm that the ACS.crt and ACS.key files exist.
+
+
+![Confirm certificate](./media/certverify.png)
+
+
+- Install self signed certificate for the Webserver:
+
+```
+yum install -y mod_ssl
+openssl req -newkey rsa:2048 -nodes -keyout /etc/pki/tls/private/ACS.key -x509 -days 365 -out /etc/pki/tls/certs/ACS.crt
+vi /etc/httpd/conf.d/ssl.conf
+```
+
+Edit the ssl.conf to conform with the key and crt file we created.
+
+
+![Modify ssl.conf](./media/conf.png)
+
+
+### Create AMIs from the Nginx, Bastion and Webserver Instances
+
+## STEP 7: Create Launch Templates
+
+For bastion host launch template: 
+
+- Set up a launch template with the Bastion AMI.
+- Ensure the instances are launched into the public subnet.
+- Enter the userdata to update yum package repository and install ansible and mysql.
+
+```
+#!/bin/bash 
+yum install -y mysql 
+yum install -y git tmux 
+yum install -y ansible
+```
+
+For Nginx Server Launch Template:
+
+- Set up a launch template with the Nginx AMI.
+- Ensure the instances are launched into the public subnet.
+- Assign appropriate security group.
+- Enter the following userdata:
+
+```
+#!/bin/bash
+yum install -y nginx
+systemctl start nginx
+systemctl enable nginx
+git clone https://github.com/enyioman/ACS-project-config.git
+mv ACS-project-config/reverse.conf /etc/nginx/
+mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf-distro
+cd /etc/nginx/
+touch nginx.conf
+sed -n 'w nginx.conf' reverse.conf
+systemctl restart nginx
+rm -rf reverse.conf
+rm -rf ACS-project-config
+```
+
+For Tooling Server Launch Template: 
+
+- Set up a launch template with the Webserver AMI.
+- Ensuring the instances are launched into the private subnet.
+- Assign appropriate security group.
+- Enter the following userdata. Ensure you modify the EFS mount point.
+
+```
+#!/bin/bash
+mkdir /var/www/
+sudo mount -t efs -o tls,accesspoint=fsap-056fe1371c5d5f2c0 fs-0c25c2be9879367d5:/ /var/www/
+yum install -y httpd 
+systemctl start httpd
+systemctl enable httpd
+yum module reset php -y
+yum module enable php:remi-7.4 -y
+yum install -y php php-common php-mbstring php-opcache php-intl php-xml php-gd php-curl php-mysqlnd php-fpm php-json
+systemctl start php-fpm
+systemctl enable php-fpm
+git clone https://github.com/enyioman/tooling.git
+mkdir /var/www/html
+cp -R tooling/html/*  /var/www/html/
+cd tooling
+mysql -h toolingdb.c9tkkvrdsgea.us-east-1.rds.amazonaws.com -u admin -p toolingdb < tooling-db.sql
+cd /var/www/html/
+touch healthstatus
+sed -i "s/$db = mysqli_connect('mysql.tooling.svc.cluster.local', 'admin', 'password', 'toolingdb');/$db = mysqli_connect('toolingdb.c9tkkvrdsgea.us-east-1.rds.amazonaws.com', 'admin', 'password', 'toolingdb');/g" functions.php
+chcon -t httpd_sys_rw_content_t /var/www/html/ -R
+systemctl restart httpd
+```
+
+For Wordpress Server Launch Template
+
+- Set up a launch template with the Webserver AMI.
+- Ensure the instances are launched into the private subnet.
+- Assign appropriate security group.
+- Use the following userdata. Ensure you modify the RDS endpoint and EFS mount point.
+
+```
+#!/bin/bash
+mkdir /var/www/
+sudo mount -t efs -o tls,accesspoint=fsap-087ead6ff2a98bc10 fs-0c25c2be9879367d5:/ /var/www/
+yum install -y httpd 
+systemctl start httpd
+systemctl enable httpd
+yum module reset php -y
+yum module enable php:remi-7.4 -y
+yum install -y php php-common php-mbstring php-opcache php-intl php-xml php-gd php-curl php-mysqlnd php-fpm php-json
+systemctl start php-fpm
+systemctl enable php-fpm
+wget http://wordpress.org/latest.tar.gz
+tar xzvf latest.tar.gz
+rm -rf latest.tar.gz
+cp wordpress/wp-config-sample.php wordpress/wp-config.php
+mkdir /var/www/html/
+cp -R /wordpress/* /var/www/html/
+cd /var/www/html/
+touch healthstatus
+sed -i "s/localhost/toolingdb.c9tkkvrdsgea.us-east-1.rds.amazonaws.com/g" wp-config.php 
+sed -i "s/admin/g" wp-config.php 
+sed -i "s/password/g" wp-config.php 
+sed -i "s/tooling/g" wp-config.php 
+chcon -t httpd_sys_rw_content_t /var/www/html/ -R
+systemctl restart httpd
 ```
 
