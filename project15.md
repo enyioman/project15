@@ -498,7 +498,7 @@ Create Tooling Auto Scaling Group
 
 ## STEP 11: Configure the database
 
-Connect to the bastion server through SSH. Then connect to the RDS database:
+Connect to the bastion server through SSH, then to the Webserver. Now connect to the RDS database:
 
 ```
 mysql -h toolingdb.c9tkkvrdsgea.us-east-1.rds.amazonaws.com -u admin -p 
