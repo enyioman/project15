@@ -232,12 +232,18 @@ Edit the ssl.conf to conform with the key and crt file we created.
 
 ### Create AMIs from the Nginx, Bastion and Webserver Instances
 
+Create an AMI from all instances.
+
+![AMIs](./media/imagecreation.png)
+
+![AMIs](./media/ami.png)
+
 ## STEP 7: Create Launch Templates
 
 For bastion host launch template: 
 
 - Set up a launch template with the Bastion AMI.
-- Ensure the instances are launched into the public subnet.
+- Ensure the Instances are launched into the public subnet.
 - Enter the userdata to update yum package repository and install ansible and mysql.
 
 ```
@@ -270,10 +276,74 @@ rm -rf reverse.conf
 rm -rf ACS-project-config
 ```
 
+The reverse.conf file was modified to use the custom server name and internal load balancer DNS name. Since the Nginx servers will be acting as reverse proxy and directing traffic to the internal load balancer, this configuration is necessary.
+
+```
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
+
+# Load dynamic modules. See /usr/share/doc/nginx/README.dynamic.
+include /usr/share/nginx/modules/*.conf;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile            on;
+    tcp_nopush          on;
+    tcp_nodelay         on;
+    keepalive_timeout   65;
+    types_hash_max_size 2048;
+
+    
+    default_type        application/octet-stream;
+
+    # Load modular configuration files from the /etc/nginx/conf.d directory.
+    # See http://nginx.org/en/docs/ngx_core_module.html#include
+    # for more information.
+    include /etc/nginx/conf.d/*.conf;
+
+     server {
+        listen       80;
+        listen       443 http2 ssl;
+        listen       [::]:443 http2 ssl;
+        root          /var/www/html;
+        server_name  *.yormany.ml;
+        
+        
+        ssl_certificate /etc/ssl/certs/ACS.crt;
+        ssl_certificate_key /etc/ssl/private/ACS.key;
+        ssl_dhparam /etc/ssl/certs/dhparam.pem;
+
+      
+
+        location /healthstatus {
+        access_log off;
+        return 200;
+       }
+    
+         
+        location / {
+            proxy_set_header             Host $host;
+            proxy_pass                   https://internal-project15-private-alb-458093750.us-east-1.elb.amazonaws.com;
+           }
+    }
+}
+```
+
 For Tooling Server Launch Template: 
 
 - Set up a launch template with the Webserver AMI.
-- Ensuring the instances are launched into the private subnet.
+- Ensure the Instances are launched into the private subnet.
 - Assign appropriate security group.
 - Enter the following userdata. Ensure you modify the EFS mount point.
 
@@ -304,7 +374,7 @@ systemctl restart httpd
 For Wordpress Server Launch Template
 
 - Set up a launch template with the Webserver AMI.
-- Ensure the instances are launched into the private subnet.
+- Ensure the Instances are launched into the private subnet.
 - Assign appropriate security group.
 - Use the following userdata. Ensure you modify the RDS endpoint and EFS mount point.
 
@@ -335,4 +405,114 @@ sed -i "s/tooling/g" wp-config.php
 chcon -t httpd_sys_rw_content_t /var/www/html/ -R
 systemctl restart httpd
 ```
+
+## STEP 8: Configure Target Groups
+
+Create three Target Group for Nginx server, WordPress server and Tooling server respectively with the same settings:
+
+- Select Instances as the target type.
+- Ensure the protocol HTTPS on secure TLS port 443.
+- Ensure that the health check path is `/healthstatus`.
+
+![Target groups](./media/tg.png)
+
+
+## STEP 9: Configure Load Balancer
+
+For External Load Balancer
+
+- Select internet facing option.
+- Ensure that it listens on HTTPS protocol (TCP port 443).
+- Ensure the ALB is created within the appropriate VPC, AZ and the right subnets.
+- Choose the certificate already created from ACM.
+- Select Security Group for the external load balancer.
+- Select Nginx Instances as the target group.
+
+![External ALB](./media/extalb3.png)
+
+Create four A records that points to the external load balancer as follows:
+
+![External route](./media/toolingroute2.png)
+
+![External route](./media/toolingroute3.png)
+
+![External route](./media/wordpressroute.png)
+
+![External route](./media/wordpressroute2.png)
+
+
+For Internal Load Balancer
+
+- Set the internal ALB option.
+- Ensure that it listens on HTTPS protocol (TCP port 443).
+- Ensure the ALB is created within the appropriate VPC, AZ and Subnets.
+- Choose the certificate already created from ACM.
+- Select Security Group for the internal load balancer.
+- Select webserver Instances as the target group.
+- Ensure that health check passes for the target group.
+
+![Internal ALB](./media/intalb3.png)
+
+To configure the Internal Load Balancer to forward traffic to Wordpress webserver, add a new rule and configure to forward the traffic to Wordpress Target Group as below:
+
+![Internal ALB config](./media/intalbconfig2.png)
+
+![Internal ALB config](./media/intalbconfig3.png)
+
+
+## STEP 10: Configure AutoScaling Group
+
+Create Bastion Auto Scaling Group
+
+- Choose the bastion launch template and the two public subnets.
+- Pick the no load balancer option.
+- Set Target Tracking Scaling Policy with CPU at 90%.
+- Set SNS Topic notifications.
+- Create the Auto Scaling Group.
+
+Create the Nginx Auto Scaling Group
+
+- Choose the Nginx launch template and the two public subnets.
+- Select existing load balancer and choose the Nginx Target Group.
+- Set Target Tracking Scaling Policy with CPU at 90%.
+- Set SNS Topic notifications.
+- Create the Auto Scaling Group.
+
+Create WordPress Auto Scaling Group:
+
+- Choose the WordPress launch template and two private subnets (1 and 2).
+- Select existing load balancer and choose the WordPress Target Group.
+- Set Target Tracking Scaling Policy with CPU at 90%.
+- Set SNS Topic notifications.
+- Create the Auto Scaling Group.
+
+Create Tooling Auto Scaling Group
+
+- Choose the tooling launch template and two private subnets (1 and 2).
+- Select existing load balancer and choose the Tooling Target Group.
+- Set Target Tracking Scaling Policy with CPU at 90%
+- Set SNS Topic notifications.
+- Create the Auto Scaling Group.
+
+![Auto-scaling groups](./media/asg.png)
+
+## STEP 11: Configure the database
+
+Connect to the bastion server through SSH. Then connect to the RDS database:
+
+```
+mysql -h toolingdb.c9tkkvrdsgea.us-east-1.rds.amazonaws.com -u admin -p 
+```
+
+![DB connect](./media/rdsconn.png)
+                                                    
+
+In MySQL, create a database called `toolingdb`:
+
+```
+CREATE DATABASE toolingdb; 
+CREATE DATABASE wordpressdb;                                             
+```
+
+![DB connect](./media/dbcreate.png)
 
