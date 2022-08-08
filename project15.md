@@ -514,5 +514,5 @@ CREATE DATABASE toolingdb;
 CREATE DATABASE wordpressdb;                                             
 ```
 
-![DB connect](./media/dbcreate.png)
+![DB connect](./media/dbcreate2.png)
 
