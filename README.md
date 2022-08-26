@@ -8,7 +8,7 @@ This project demonstrates how a secure infrastructure inside AWS VPC (Virtual Pr
 
 Steps taken:
 
-1. Set uo Organisation Unit and a Sub-account. 
+1. Set up Organisation Unit and a Sub-account. 
 
 2. Create and configure an AWS VPC.
 
